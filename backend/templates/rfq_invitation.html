@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { padding: 20px; max-width: 600px; margin: auto; }
+    .btn { display: inline-block; padding: 10px 20px; background-color: #0f172a; color: #ffffff; text-decoration: none; border-radius: 5px; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h2>Request for Quotation</h2>
+    <p>Dear {{ vendor_name }},</p>
+    <p>We are inviting you to submit a quotation for our upcoming requirement: <strong>{{ rfq_title }}</strong>.</p>
+    <p>Please click the button below to view the specifications and submit your secure quotation.</p>
+    <br>
+    <a href="{{ submission_link }}" class="btn" style="color: #ffffff;">Submit Quotation</a>
+    <br><br>
+    <p>Thank you,<br>VendorMind AI Procurement Team</p>
+</div>
+</body>
+</html>
