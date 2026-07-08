@@ -64,6 +64,7 @@ export default function VendorsPage() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [viewVendor, setViewVendor] = useState<any>(null);
+  const [editingVendorId, setEditingVendorId] = useState<string | null>(null);
   const [formData, setFormData] = useState<VendorForm>(emptyForm);
   const [search, setSearch] = useState("");
 
@@ -76,17 +77,49 @@ export default function VendorsPage() {
 
   useEffect(() => { fetchVendors(); }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const openEdit = (v: any) => {
+    setEditingVendorId(v.id);
+    const ci = v.contact_info || {};
+    setFormData({
+      name: v.name || "",
+      email: v.email || "",
+      category: ci.category || "",
+      phone: ci.phone || "",
+      website: ci.website || "",
+      address: ci.address || "",
+      city: ci.city || "",
+      country: ci.country || "",
+      notes: ci.notes || "",
+    });
+    setOpen(true);
+  };
+
+  const handleDelete = async (vendorId: string) => {
+    if (!confirm("Are you sure you want to delete this vendor?")) return;
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/vendors/${vendorId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+    });
+    if (res.ok) fetchVendors();
+    else alert("Failed to delete vendor");
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     const contact_info = { category: formData.category, phone: formData.phone, website: formData.website, address: formData.address, city: formData.city, country: formData.country, notes: formData.notes };
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/vendors`, {
-      method: "POST",
+    
+    const url = editingVendorId 
+      ? `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/vendors/${editingVendorId}`
+      : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/vendors`;
+      
+    const res = await fetch(url, {
+      method: editingVendorId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${localStorage.getItem("token")}` },
       body: JSON.stringify({ name: formData.name, email: formData.email, contact_info }),
     });
-    if (res.ok) { setOpen(false); setFormData(emptyForm); fetchVendors(); }
-    else { const err = await res.json(); alert(err.detail || "Failed to create vendor"); }
+    if (res.ok) { setOpen(false); setFormData(emptyForm); setEditingVendorId(null); fetchVendors(); }
+    else { const err = await res.json(); alert(err.detail || "Failed to save vendor"); }
     setLoading(false);
   };
 
@@ -121,7 +154,7 @@ export default function VendorsPage() {
           <p className="text-muted-foreground mt-1 text-sm">Manage and track all your company vendors</p>
         </div>
 
-        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setFormData(emptyForm); }}>
+        <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) { setFormData(emptyForm); setEditingVendorId(null); } }}>
           <DialogTrigger render={
             <Button className="rounded-xl font-semibold" style={{background: "linear-gradient(135deg, oklch(0.55 0.22 265), oklch(0.65 0.2 290))", boxShadow: "0 4px 16px oklch(0.65 0.22 265 / 30%)"}}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -130,10 +163,10 @@ export default function VendorsPage() {
           } />
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl" style={{background: "oklch(0.13 0.025 265)", border: "1px solid oklch(0.25 0.03 265 / 60%)"}}>
             <DialogHeader>
-              <DialogTitle className="text-foreground">Add New Vendor</DialogTitle>
+              <DialogTitle className="text-foreground">{editingVendorId ? "Edit Vendor" : "Add New Vendor"}</DialogTitle>
               <DialogDescription className="text-muted-foreground">Fill in vendor details. Category helps the AI filter vendors during RFQ creation.</DialogDescription>
             </DialogHeader>
-            <form onSubmit={handleCreate} className="space-y-5 py-2">
+            <form onSubmit={handleSubmit} className="space-y-5 py-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Basic Information</p>
                 <div className="grid grid-cols-2 gap-4">
@@ -191,7 +224,7 @@ export default function VendorsPage() {
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setOpen(false)} className="rounded-xl border-border/60">Cancel</Button>
                 <Button type="submit" disabled={loading || !formData.category} className="rounded-xl" style={{background: "linear-gradient(135deg, oklch(0.55 0.22 265), oklch(0.65 0.2 290))"}}>
-                  {loading ? "Saving..." : "Add Vendor"}
+                  {loading ? "Saving..." : (editingVendorId ? "Update Vendor" : "Add Vendor")}
                 </Button>
               </DialogFooter>
             </form>
@@ -245,7 +278,7 @@ export default function VendorsPage() {
             </div>
             <div className="divide-y" style={{borderColor: "oklch(0.18 0.02 265 / 60%)"}}>
               {filtered.map(v => (
-                <div key={v.id} className="grid grid-cols-7 px-6 py-4 items-center transition-colors hover:bg-muted/20">
+                <div key={v.id} className="grid grid-cols-7 px-6 py-4 items-center transition-colors hover:bg-muted/20 group">
                   <div className="col-span-2 flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shrink-0" style={{background: "oklch(0.65 0.22 265 / 15%)", color: "oklch(0.78 0.18 265)"}}>
                       {v.name.charAt(0).toUpperCase()}
@@ -261,9 +294,15 @@ export default function VendorsPage() {
                   <div className="text-sm text-muted-foreground">{ci(v).phone || "—"}</div>
                   <div className="text-sm text-muted-foreground">{[ci(v).city, ci(v).country].filter(Boolean).join(", ") || "—"}</div>
                   <div><TrustScore score={v.trust_score} /></div>
-                  <div className="text-right">
-                    <Button size="sm" variant="ghost" onClick={() => setViewVendor(v)} className="rounded-xl text-xs h-7 hover:bg-muted/40">
-                      View
+                  <div className="text-right flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button size="icon" variant="ghost" onClick={() => setViewVendor(v)} className="w-8 h-8 rounded-lg hover:bg-muted/40 text-muted-foreground" title="View">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => openEdit(v)} className="w-8 h-8 rounded-lg hover:bg-muted/40 text-muted-foreground" title="Edit">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => handleDelete(v.id)} className="w-8 h-8 rounded-lg hover:bg-destructive/10 text-destructive hover:text-destructive" title="Delete">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
                     </Button>
                   </div>
                 </div>

@@ -30,3 +30,10 @@ def update_vendor(vendor_id: str, vendor: schemas.VendorUpdate, db: Session = De
     if not db_vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
     return db_vendor
+
+@router.delete("/{vendor_id}")
+def delete_vendor(vendor_id: str, db: Session = Depends(database.get_db), current_admin: models.User = Depends(auth.get_current_admin_user)):
+    success = crud.delete_vendor(db, vendor_id, current_admin.company_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {"message": "Vendor deleted successfully"}
