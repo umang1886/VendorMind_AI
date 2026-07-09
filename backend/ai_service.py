@@ -2,6 +2,8 @@ import os
 import json
 import logging
 from typing import Dict, Any
+import PyPDF2
+
 try:
     from langchain_groq import ChatGroq
     from langchain_core.prompts import PromptTemplate
@@ -98,6 +100,23 @@ def run_ai_extraction(quotation_id: str, db):
     # Simulate combining form text + document text
     combined_text = f"Price: {quotation.price}\nDelivery: {quotation.delivery_timeline}\nWarranty: {quotation.warranty_terms}\nPayment: {quotation.payment_terms}\nNotes: {quotation.notes}"
     
+    # Extract text from attached PDF if present
+    if quotation.document_url and quotation.document_url.lower().endswith('.pdf'):
+        try:
+            if os.path.exists(quotation.document_url):
+                with open(quotation.document_url, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    pdf_text = ""
+                    for page in reader.pages:
+                        text = page.extract_text()
+                        if text:
+                            pdf_text += text + "\n"
+                
+                if pdf_text.strip():
+                    combined_text += "\n\n--- EXTRACTED PDF CONTENT ---\n" + pdf_text.strip()
+        except Exception as e:
+            logger.error(f"Failed to extract text from PDF {quotation.document_url}: {e}")
+            
     extracted_data = extract_quotation_data(combined_text)
     risk_flags = analyze_contract_risk(combined_text)
     

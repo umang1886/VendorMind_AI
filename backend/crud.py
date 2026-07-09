@@ -59,6 +59,26 @@ def update_vendor(db: Session, vendor_id: str, company_id: str, vendor_update: s
     db.refresh(db_vendor)
     return db_vendor
 
+def delete_vendor(db: Session, vendor_id: str, company_id: str) -> bool:
+    db_vendor = get_vendor(db, vendor_id, company_id)
+    if not db_vendor:
+        return False
+        
+    # Manually delete dependent records to avoid IntegrityError
+    db.query(models.VendorRating).filter(models.VendorRating.vendor_id == vendor_id).delete(synchronize_session=False)
+    db.query(models.PurchaseOrder).filter(models.PurchaseOrder.vendor_id == vendor_id).delete(synchronize_session=False)
+    db.query(models.AIRecommendation).filter(models.AIRecommendation.recommended_vendor_id == vendor_id).delete(synchronize_session=False)
+    
+    # Delete Quotations associated with RFQVendors of this vendor
+    rfq_vendors = db.query(models.RFQVendor).filter(models.RFQVendor.vendor_id == vendor_id).all()
+    for rv in rfq_vendors:
+        db.query(models.Quotation).filter(models.Quotation.rfq_vendor_id == rv.id).delete()
+        db.delete(rv)
+        
+    db.delete(db_vendor)
+    db.commit()
+    return True
+
 def get_rfqs(db: Session, company_id: str):
     return db.query(models.RFQ).filter(models.RFQ.company_id == company_id).all()
 
