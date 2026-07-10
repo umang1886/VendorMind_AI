@@ -84,3 +84,19 @@ class QuotationSubmit(BaseModel):
     # document_url will be handled separately or via multipart if we had file upload
     # Since Phase 5 specifies "file upload stored in Supabase", we will use Form data in FastAPI for file upload.
 
+
+class ChatMessageCreate(BaseModel):
+    content: str
+
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    rfq_id: str
+    vendor_id: str
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+        from_attributes = True

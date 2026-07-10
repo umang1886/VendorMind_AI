@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -55,6 +55,78 @@ export default function RFQDetailPage() {
   const [selectedQuotation, setSelectedQuotation] = useState<any>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
+  // Negotiation Chatbot state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatVendor, setChatVendor] = useState<any>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [checkingReplies, setCheckingReplies] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  const openChat = async (q: any) => {
+    setChatVendor(q);
+    setChatMessages([]);
+    setChatOpen(true);
+    // Load existing chat history
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/rfqs/${id}/vendors/${q.vendor_id}/chat`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.ok) {
+      const history = await res.json();
+      setChatMessages(history.filter((m: any) => m.role !== "system"));
+    }
+  };
+
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const token = localStorage.getItem("token");
+    const userContent = chatInput.trim();
+    setChatInput("");
+    setChatMessages(prev => [...prev, { role: "user", content: userContent, id: Date.now() }]);
+    setChatLoading(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/rfqs/${id}/vendors/${chatVendor.vendor_id}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content: userContent })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setChatMessages(prev => [...prev, data.ai_response]);
+      }
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const checkVendorReplies = async () => {
+    if (!chatVendor || checkingReplies) return;
+    setCheckingReplies(true);
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/rfqs/${id}/vendors/${chatVendor.vendor_id}/check-replies`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.new_replies_found > 0) {
+          setChatMessages(prev => [...prev, ...data.new_messages]);
+        } else {
+          setChatMessages(prev => [...prev, { id: Date.now(), role: "assistant", content: "📭 No new replies from the vendor yet." }]);
+        }
+      }
+    } finally {
+      setCheckingReplies(false);
+    }
+  };
+
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   const toggleRow = (id: string) => {
     setExpandedRow(prev => prev === id ? null : id);
   };
@@ -65,8 +137,8 @@ export default function RFQDetailPage() {
     const nameLen = q.vendor_name?.length || 5;
     const priceMod = (q.quotation?.price || 1000) % 5;
     
-    // Treat DD ltd (or any explicitly new vendor) as having no past history
-    const isNewVendor = q.vendor_name?.toLowerCase().includes('dd ltd');
+    // Treat vendors with no trust score as new vendors with no past history
+    const isNewVendor = !q.trust_score;
     
     // Base it loosely on the provided example to look realistic
     return {
@@ -352,6 +424,17 @@ export default function RFQDetailPage() {
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
                       View AI Analysis
                     </Button>
+                    {q.status === "submitted" && (
+                      <Button
+                        size="sm"
+                        className="rounded-xl text-xs h-7"
+                        style={{background: "linear-gradient(135deg, oklch(0.45 0.22 300), oklch(0.58 0.2 265))", boxShadow: "0 2px 8px oklch(0.55 0.22 300 / 30%)"}}
+                        onClick={() => openChat(q)}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="mr-1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        Negotiate (AI)
+                      </Button>
+                    )}
                     {rfq.status === "awarded" && (
                       <Button size="sm" variant="outline" className="rounded-xl text-xs h-7 border-border/60" onClick={() => { setRatingVendorId(q.vendor_id); setRatingOpen(true); }}>
                         Rate Performance
@@ -466,6 +549,129 @@ export default function RFQDetailPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setAnalysisOpen(false)} className="rounded-xl border-border/60 w-full">Close</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Negotiation Chatbot Dialog */}
+      <Dialog open={chatOpen} onOpenChange={(o) => { setChatOpen(o); if (!o) { setChatMessages([]); setChatVendor(null); } }}>
+        <DialogContent
+          className="rounded-2xl flex flex-col"
+          style={{
+            background: "oklch(0.12 0.025 265)",
+            border: "1px solid oklch(0.25 0.03 265 / 60%)",
+            maxWidth: "600px",
+            width: "95vw",
+            maxHeight: "85vh",
+            height: "85vh",
+            display: "flex",
+            flexDirection: "column",
+            padding: 0,
+            overflow: "hidden",
+          }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{borderColor: "oklch(0.25 0.03 265 / 50%)"}}>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold" style={{background: "oklch(0.45 0.22 300 / 25%)", color: "oklch(0.75 0.18 300)"}}>
+                {chatVendor?.vendor_name?.charAt(0)?.toUpperCase()}
+              </div>
+              <div>
+                <p className="font-semibold text-foreground text-sm">{chatVendor?.vendor_name}</p>
+                <p className="text-xs text-muted-foreground">AI Negotiation Assistant</p>
+              </div>
+            </div>
+            <button
+              onClick={checkVendorReplies}
+              disabled={checkingReplies}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors"
+              style={{background: "oklch(0.65 0.22 265 / 10%)", color: "oklch(0.75 0.18 265)", border: "1px solid oklch(0.65 0.22 265 / 20%)"}}
+            >
+              {checkingReplies ? (
+                <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              )}
+              Check Vendor Replies
+            </button>
+          </div>
+
+          {/* Messages area */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4" style={{minHeight: 0}}>
+            {chatMessages.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full text-center gap-3 py-8">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{background: "oklch(0.45 0.22 300 / 15%)"}}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="oklch(0.7 0.18 300)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <p className="text-sm font-medium text-foreground">Start Negotiation</p>
+                <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+                  Discuss pricing, delivery terms, or ask the AI to draft a negotiation email. When ready, say &ldquo;send the email&rdquo;.
+                </p>
+              </div>
+            )}
+            {chatMessages.map((msg, i) => (
+              <div key={msg.id || i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                {msg.role !== "user" && (
+                  <div className="w-7 h-7 rounded-lg shrink-0 flex items-center justify-center mt-0.5" style={{background: "oklch(0.45 0.22 300 / 20%)"}}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="oklch(0.72 0.18 300)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                  </div>
+                )}
+                <div
+                  className="max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed"
+                  style={{
+                    background: msg.role === "user"
+                      ? "linear-gradient(135deg, oklch(0.45 0.22 265), oklch(0.55 0.2 290))"
+                      : "oklch(0.18 0.025 265)",
+                    color: "oklch(0.92 0.02 265)",
+                    borderRadius: msg.role === "user" ? "1rem 1rem 0.25rem 1rem" : "1rem 1rem 1rem 0.25rem",
+                    border: msg.role !== "user" ? "1px solid oklch(0.25 0.03 265 / 60%)" : "none",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {chatLoading && (
+              <div className="flex gap-3">
+                <div className="w-7 h-7 rounded-lg shrink-0 flex items-center justify-center" style={{background: "oklch(0.45 0.22 300 / 20%)"}}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="oklch(0.72 0.18 300)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                </div>
+                <div className="px-4 py-3 rounded-2xl" style={{background: "oklch(0.18 0.025 265)", border: "1px solid oklch(0.25 0.03 265 / 60%)"}}>
+                  <div className="flex gap-1 items-center h-4">
+                    <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{background: "oklch(0.65 0.22 265)", animationDelay: "0ms"}} />
+                    <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{background: "oklch(0.65 0.22 265)", animationDelay: "150ms"}} />
+                    <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{background: "oklch(0.65 0.22 265)", animationDelay: "300ms"}} />
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={chatBottomRef} />
+          </div>
+
+          {/* Input area */}
+          <div className="px-4 py-3 border-t shrink-0" style={{borderColor: "oklch(0.25 0.03 265 / 50%)"}}>
+            <div className="flex gap-2 items-end">
+              <Textarea
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                placeholder={`Chat with AI about ${chatVendor?.vendor_name ?? "vendor"} terms... (Enter to send, Shift+Enter for newline)`}
+                className="resize-none rounded-xl text-sm flex-1"
+                style={{background: "oklch(0.16 0.025 265)", border: "1px solid oklch(0.28 0.04 265 / 60%)", minHeight: "44px", maxHeight: "120px"}}
+                rows={1}
+              />
+              <Button
+                onClick={sendChatMessage}
+                disabled={chatLoading || !chatInput.trim()}
+                className="rounded-xl h-11 w-11 p-0 shrink-0"
+                style={{background: "linear-gradient(135deg, oklch(0.45 0.22 300), oklch(0.58 0.2 265))"}}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2 px-1">Say &ldquo;send the email&rdquo; to have the AI draft and send a negotiation email to the vendor.</p>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

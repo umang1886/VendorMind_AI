@@ -168,3 +168,110 @@ def generate_recommendation(rfq: Any, quotations: list, hindsight_contexts: dict
         logger.error(f"Failed to generate recommendation: {e}")
         return {"recommended_vendor_id": None, "reasoning": "Failed to generate", "negotiation_suggestions": []}
 
+
+def handle_chat_message(
+    rfq_product: str,
+    vendor_name: str,
+    vendor_email: str,
+    rfq_id: str,
+    vendor_id: str,
+    user_message: str,
+    chat_history: list,
+    db=None
+) -> str:
+    """
+    Process a user message in the negotiation chatbot.
+    If the user asks to send an email, the AI will draft and send it automatically.
+    Returns the AI's reply as a string.
+    """
+    if not AI_AVAILABLE:
+        return "AI service unavailable. Please check your configuration."
+
+    import email_service
+
+    llm = get_llm(tier="complex")
+
+    # Build the conversation history as a string for the prompt
+    history_str = ""
+    for msg in chat_history[-10:]:  # last 10 messages for context window
+        role_label = "You (Procurement Manager)" if msg["role"] == "user" else "AI Assistant"
+        history_str += f"{role_label}: {msg['content']}\n"
+
+    system_prompt = (
+        f"You are a professional procurement negotiation assistant for VendorMind AI. "
+        f"You are helping negotiate with vendor '{vendor_name}' (email: {vendor_email}) "
+        f"regarding the RFQ for product '{rfq_product}'.\n\n"
+        f"Your capabilities:\n"
+        f"1. Discuss negotiation strategy and terms with the procurement manager.\n"
+        f"2. Draft professional emails to the vendor.\n"
+        f"3. When the user asks you to SEND an email (e.g., 'send this', 'send the email', 'go ahead and send'), "
+        f"you MUST include a JSON block at the very end of your response in this exact format:\n"
+        f'[EMAIL_ACTION]{{"subject": "...", "body": "..."}}\n\n'
+        f"The email body should be professional HTML-safe plain text.\n"
+        f"If the user is just chatting or asking for a draft, do NOT include the [EMAIL_ACTION] block.\n\n"
+        f"Conversation history:\n{history_str}"
+    )
+
+    prompt = PromptTemplate.from_template(
+        "{system}\n\nProcurement Manager: {message}\n\nAI Assistant:"
+    )
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        response = chain.invoke({"system": system_prompt, "message": user_message})
+        response = response.strip()
+
+        # Check if AI wants to send an email
+        if "[EMAIL_ACTION]" in response:
+            parts = response.split("[EMAIL_ACTION]", 1)
+            ai_text = parts[0].strip()
+            action_json_str = parts[1].strip()
+            try:
+                action = json.loads(action_json_str)
+                subject = action.get("subject", f"Negotiation: {rfq_product}")
+                body = action.get("body", "")
+                # Send the email
+                email_service.send_negotiation_email(
+                    to=vendor_email,
+                    subject=subject,
+                    body=body,
+                    rfq_id=rfq_id,
+                    vendor_id=vendor_id
+                )
+                return ai_text + f"\n\n✅ **Email sent to {vendor_name}** ({vendor_email}) with subject: *\"{subject}\"*"
+            except Exception as e:
+                logger.error(f"Failed to parse/send email action: {e}")
+                return response  # Return raw response if email parse fails
+        return response
+    except Exception as e:
+        logger.error(f"Chat AI error: {e}")
+        return "Sorry, I encountered an error processing your message. Please try again."
+
+
+def analyze_vendor_reply(reply_text: str, vendor_name: str) -> str:
+    """
+    Analyze a vendor's email reply and return a summary for the chatbot.
+    """
+    if not AI_AVAILABLE:
+        return f"📧 New reply from {vendor_name} received:\n\n{reply_text}"
+
+    llm = get_llm(tier="cheap")
+
+    prompt = PromptTemplate.from_template(
+        "A vendor named '{vendor}' has replied to a negotiation email. "
+        "Analyze their reply and provide a concise summary of:\n"
+        "1. What they agreed to\n"
+        "2. What they rejected or countered\n"
+        "3. Any new terms or conditions they proposed\n"
+        "4. Recommended next steps for the procurement manager\n\n"
+        "Vendor Reply:\n{reply}\n\n"
+        "Summary:"
+    )
+    chain = prompt | llm | StrOutputParser()
+
+    try:
+        summary = chain.invoke({"vendor": vendor_name, "reply": reply_text})
+        return f"📧 **New reply from {vendor_name}:**\n\n{summary.strip()}"
+    except Exception as e:
+        logger.error(f"Failed to analyze vendor reply: {e}")
+        return f"📧 New reply from {vendor_name} received:\n\n{reply_text}"

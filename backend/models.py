@@ -129,3 +129,17 @@ class VendorRating(Base):
     support_score = Column(Integer, nullable=True)
     comments = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class ChatMessageRoleEnum(str, enum.Enum):
+    user = "user"
+    assistant = "assistant"
+    system = "system"
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id = Column(String, primary_key=True, default=generate_uuid)
+    rfq_id = Column(String, ForeignKey("rfqs.id"), nullable=False)
+    vendor_id = Column(String, ForeignKey("vendors.id"), nullable=False)
+    role = Column(Enum(ChatMessageRoleEnum), default=ChatMessageRoleEnum.user)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
